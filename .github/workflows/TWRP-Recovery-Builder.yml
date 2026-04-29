@@ -6,12 +6,15 @@ on:
       DEVICE_TREE:
         description: "Device tree repo"
         required: true
+        default: "https://github.com/XPXC87/android_device_xiaomi_rothko_twrp"
       DEVICE_TREE_BRANCH:
         description: "Device tree branch"
         required: true
+        default: "twrp-14.1_a16"
       DEVICE_NAME:
         description: "Device codename"
         required: true
+        default: "rothko"
       ORIGINAL_VENDOR_BOOT:
         description: "原廠 vendor_boot.img 下載連結"
         required: true
