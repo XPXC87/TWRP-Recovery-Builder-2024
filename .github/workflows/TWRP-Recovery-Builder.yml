@@ -110,27 +110,36 @@ jobs:
           sudo ln -sf ~/bin/repo /usr/bin/repo
 
       - name: 檢查清單分支類型 (AOSP 或 Omni)
-        uses: haya14busa/action-cond@v1
-        id: manifest
-        with:
-          cond: ${{ github.event.inputs.MANIFEST_BRANCH == 'twrp-11' || github.event.inputs.MANIFEST_BRANCH == 'twrp-12.1'  || github.event.inputs.MANIFEST_BRANCH == 'twrp-14.1' }}
-          if_true: https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git
-          if_false: https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git
+        run: |
+          BRANCH="${{ github.event.inputs.MANIFEST_BRANCH }}"
+
+          # 預設用 Omni（舊版）
+          MANIFEST_URL="https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git"
+
+          # AOSP 分支（Android 11+）
+          case "$BRANCH" in
+          twrp-11|twrp-12.1|twrp-14.1)
+          MANIFEST_URL="https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git"
+          ;;
+          esac
+
+          echo "MANIFEST_URL=$MANIFEST_URL" >> $GITHUB_ENV
+          echo "✔ 使用 manifest: $MANIFEST_URL"
 
       - name: 初始化 Repo 倉庫
         run: |
-          mkdir workspace
+          mkdir -p workspace
           cd workspace
+
           git config --global user.name "builder"
           git config --global user.email "builder@github.com"
 
-          if [ "${{ github.event.inputs.MANIFEST_BRANCH }}" = "twrp-14.1" ]; then
-           echo "使用 Android 14 清單"
-           repo init --depth=1 -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git -b twrp-14.1
-          else
-            echo "使用舊版清單"
-            repo init --depth=1 -u ${{ steps.manifest.outputs.value }} -b ${{ github.event.inputs.MANIFEST_BRANCH }}
-          fi
+          echo "Branch: ${{ github.event.inputs.MANIFEST_BRANCH }}"
+          echo "Manifest: $MANIFEST_URL"
+
+          repo init --depth=1 \
+            -u $MANIFEST_URL \
+            -b ${{ github.event.inputs.MANIFEST_BRANCH }}
 
       - name: 同步源碼 (Repo Sync)
         run: |
@@ -167,8 +176,8 @@ jobs:
         run: |
           cd workspace
 
+          # 載入環境
           source build/envsetup.sh
-
           export ALLOW_MISSING_DEPENDENCIES=true
           export BUILD_BROKEN_DUP_RULES=true
           export BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES=true
@@ -176,23 +185,39 @@ jobs:
           export TARGET_USES_PREBUILT_KERNEL=true
           export TW_FORCE_VENDOR_BOOT=true
 
-          # product
           PRODUCT=${{ env.DEVICE_MAKEFILE }}
 
-          # release（自動）
-          RELEASE=$(ls build/make/core/release_config 2>/dev/null | sed 's/.mk//' | head -n1)
-          [ -z "$RELEASE" ] && RELEASE=ap2a
+          # 🔥 A14 正確 release（不要再自動抓）
+          RELEASE=ap2a
 
-          # lunch（新→舊 fallback）
-          lunch ${PRODUCT}-${RELEASE}-userdebug || lunch ${PRODUCT}-eng
+          echo "Using PRODUCT=$PRODUCT"
+          echo "Using RELEASE=$RELEASE"
+
+          # 🔥 lunch（完整 fallback）
+          if lunch ${PRODUCT}-${RELEASE}-userdebug; then
+            echo "✔ lunch userdebug"
+          elif lunch ${PRODUCT}-${RELEASE}-eng; then
+            echo "✔ lunch eng"
+          elif lunch ${PRODUCT}-eng; then
+            echo "✔ legacy lunch"
+          else
+            echo "❌ lunch 失敗"
+            exit 1
+          fi
 
           # 清理（避免 ninja skip）
           mka clean
 
-          # build（改用 mka）
-          mka ${{ github.event.inputs.BUILD_TARGET }}image -j$(nproc --all)
+          # 🔥 build target 自動 fallback
+          TARGET="${{ github.event.inputs.BUILD_TARGET }}image"
 
-          echo "Done building your ${{ github.event.inputs.BUILD_TARGET }}.img"
+          if mka $TARGET -j$(nproc --all); then
+            echo "✔ build $TARGET success"
+          else
+            echo "⚠️ $TARGET 失敗 → fallback recoveryimage"
+            mka recoveryimage -j$(nproc --all)
+          fi
+          echo "Done building"
 
       - name: 設置編譯日期 (用於發佈)
         run: |
