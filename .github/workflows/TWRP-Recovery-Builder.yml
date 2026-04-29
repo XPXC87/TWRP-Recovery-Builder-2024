@@ -166,7 +166,8 @@ jobs:
       - name: 執行編譯
         run: |
           cd workspace
-          #source build/envsetup.sh
+
+          source build/envsetup.sh
 
           export ALLOW_MISSING_DEPENDENCIES=true
           export BUILD_BROKEN_DUP_RULES=true
@@ -185,11 +186,11 @@ jobs:
           # lunch（新→舊 fallback）
           lunch ${PRODUCT}-${RELEASE}-userdebug || lunch ${PRODUCT}-eng
 
-          # 🔥 強制重新編譯（關鍵）
-          make clean
+          # 清理（避免 ninja skip）
+          mka clean
 
-          # build
-          make ${{ github.event.inputs.BUILD_TARGET }}image -j$(nproc --all)
+          # build（改用 mka）
+          mka ${{ github.event.inputs.BUILD_TARGET }}image -j$(nproc --all)
 
           echo "Done building your ${{ github.event.inputs.BUILD_TARGET }}.img"
 
