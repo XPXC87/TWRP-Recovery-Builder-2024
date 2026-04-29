@@ -167,6 +167,7 @@ jobs:
         run: |
           cd workspace
           source build/envsetup.sh
+
           # 環境變數
           export ALLOW_MISSING_DEPENDENCIES=true
           export BUILD_BROKEN_DUP_RULES=true
@@ -176,41 +177,45 @@ jobs:
           export TW_FORCE_VENDOR_BOOT=true
           export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
 
-          # 抓 release（穩定）
-          RELEASE=$(ls build/make/core/release_config 2>/dev/null | sed 's/.mk//' | head -n1)
-          [ -z "$RELEASE" ] && RELEASE=ap2a
-          echo "使用 release: $RELEASE"
-
-          # 抓 product（穩定）
+          # 抓 product（支援 := / =）
           PRODUCT=$(grep -r "PRODUCT_NAME" device 2>/dev/null | grep "${DEVICE_NAME}" | head -n1 | awk -F'=' '{print $2}' | xargs)
           [ -z "$PRODUCT" ] && PRODUCT=${DEVICE_MAKEFILE}
           echo "使用 product: $PRODUCT"
 
-          # lunch（防炸 fallback）
-          lunch ${PRODUCT}-${RELEASE}-userdebug || lunch ${PRODUCT}-userdebug
-
+          # 判斷新舊架構（Android 13+ 有 release_config）
+          if [ -d build/make/core/release_config ]; then
+            echo ">>> 使用新架構 (Android 13+)"
+            # 抓 release
+            RELEASE=$(ls build/make/core/release_config 2>/dev/null | sed 's/.mk//' | head -n1)
+            [ -z "$RELEASE" ] && RELEASE=ap2a
+            echo "使用 release: $RELEASE"
+            # lunch（新架構）
+            lunch ${PRODUCT}-${RELEASE}-userdebug || lunch ${PRODUCT}-userdebug
+          else
+            echo ">>> 使用舊架構 (Android 12-)"
+            # lunch（舊架構）
+            lunch ${PRODUCT}-userdebug
+          fi
           make clean
-
           TARGET="${{ github.event.inputs.BUILD_TARGET }}"
           MANIFEST="${{ github.event.inputs.MANIFEST_BRANCH }}"
 
           if [ "$MANIFEST" = "twrp-14.1" ]; then
-            echo ">>> Android 14 模式 (優先 vendor_boot)"
+            echo ">>> Android 14+ 模式 (優先 vendor_boot)"
             mka vendorbootimage -j$(nproc --all) || {
-              echo "❌ vendor_boot 失敗 → fallback recovery"
-              mka recoveryimage
+            echo "❌ vendor_boot 失敗 → fallback recovery"
+            mka recoveryimage
             }
           else
             echo ">>> 舊版模式"
-            if [ "$TARGET" = "vendorboot" ]; then
-              mka vendorbootimage || mka recoveryimage
+          if [ "$TARGET" = "vendorboot" ]; then
+            mka vendorbootimage || mka recoveryimage
             elif [ "$TARGET" = "boot" ]; then
               mka bootimage
             else
               mka recoveryimage
             fi
           fi
-
           echo "✅ 編譯結束"
 
       - name: 設置編譯日期 (用於發佈)
