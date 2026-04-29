@@ -1,4 +1,4 @@
-name: TWRP VendorBoot Builder (Final)
+name: TWRP VendorBoot Builder FINAL
 
 on:
   workflow_dispatch:
@@ -24,89 +24,103 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: 安裝環境
-        run: |
-          sudo apt update
-          sudo apt install -y git-core repo bc bison build-essential zip curl \
-          gcc-multilib g++-multilib libc6-dev-i386 lib32ncurses5-dev \
-          x11proto-core-dev libx11-dev lib32z-dev libgl1-mesa-dev \
-          libxml2-utils xsltproc unzip fontconfig
+    - name: 安裝依賴
+      run: |
+        sudo apt update
+        sudo apt install -y git-core repo bc bison build-essential zip curl \
+        gcc-multilib g++-multilib libc6-dev-i386 lib32ncurses5-dev \
+        x11proto-core-dev libx11-dev lib32z-dev libgl1-mesa-dev \
+        libxml2-utils xsltproc unzip fontconfig cpio
 
-      - name: 初始化 Repo
-        run: |
-          mkdir workspace
-          cd workspace
+    # 🔥 解決 soong killed（關鍵）
+    - name: 啟用 Swap
+      run: |
+        sudo fallocate -l 8G /swapfile
+        sudo chmod 600 /swapfile
+        sudo mkswap /swapfile
+        sudo swapon /swapfile
 
-          repo init --depth=1 \
-            -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git \
-            -b twrp-14.1
+    - name: 初始化 Repo + 放入設備樹
+      run: |
+        mkdir workspace
+        cd workspace
 
-          # 🔥 提前放 device tree（關鍵）
-          mkdir -p device/xiaomi
-          git clone ${{ github.event.inputs.DEVICE_TREE }} \
-            -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} \
-            device/xiaomi/${{ github.event.inputs.DEVICE_NAME }}
+        repo init --depth=1 \
+          -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git \
+          -b twrp-14.1
 
-      - name: Repo Sync
-        run: |
-          cd workspace
-          repo sync -c --no-clone-bundle --no-tags -j$(nproc --all)
+        mkdir -p device/xiaomi
+        git clone ${{ github.event.inputs.DEVICE_TREE }} \
+          -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} \
+          device/xiaomi/${{ github.event.inputs.DEVICE_NAME }}
 
-      - name: Build TWRP (recovery rootfs)
-        run: |
-          cd workspace
-          source build/envsetup.sh
+    - name: Repo Sync
+      run: |
+        cd workspace
+        repo sync -c --no-clone-bundle --no-tags -j4
 
-          export ALLOW_MISSING_DEPENDENCIES=true
-          export TARGET_USES_PREBUILT_KERNEL=true
-          export TW_FORCE_VENDOR_BOOT=true
+    - name: 編譯 TWRP（穩定版）
+      run: |
+        cd workspace
 
-          lunch twrp_${{ github.event.inputs.DEVICE_NAME }}-ap2a-userdebug
-          mka recoveryimage -j$(nproc --all)
+        source build/envsetup.sh
 
-      - name: Pack recovery.cpio (正確來源🔥)
-        run: |
-          cd workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery/root
+        export ALLOW_MISSING_DEPENDENCIES=true
+        export TARGET_USES_PREBUILT_KERNEL=true
+        export TW_FORCE_VENDOR_BOOT=true
 
-          find . | cpio -o -H newc --owner root:root > ../../recovery.cpio
+        # 🔥 降負載（避免 killed）
+        export SOONG_UI_THREADS=4
+        export NINJA_ARGS=-j4
 
-          cd ../../
-          file recovery.cpio
-          cpio -t < recovery.cpio | head
+        lunch twrp_${{ github.event.inputs.DEVICE_NAME }}-ap2a-userdebug
 
-      - name: 下載 magiskboot
-        run: |
-          cd workspace
-          curl -L -o magiskboot https://github.com/topjohnwu/Magisk/releases/latest/download/magiskboot
-          chmod +x magiskboot
+        mka recoveryimage -j4
 
-      - name: 下載原廠 vendor_boot
-        run: |
-          cd workspace
-          curl -L "${{ github.event.inputs.ORIGINAL_VENDOR_BOOT }}" -o vendor_boot.img
-          ls -lh vendor_boot.img
+    - name: 生成正確 recovery.cpio
+      run: |
+        cd workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery/root
 
-      - name: 注入 TWRP 到 vendor_boot
-        run: |
-          cd workspace
+        find . | cpio -o -H newc --owner root:root > ../../recovery.cpio
 
-          ./magiskboot unpack vendor_boot.img
+        cd ../../
+        echo "==== 驗證 cpio ===="
+        file recovery.cpio
+        cpio -t < recovery.cpio | head
 
-          rm -f ramdisk.cpio
-          cp out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery.cpio ramdisk.cpio
+    - name: 下載 magiskboot
+      run: |
+        cd workspace
+        curl -L -o magiskboot https://github.com/topjohnwu/Magisk/releases/latest/download/magiskboot
+        chmod +x magiskboot
 
-          ./magiskboot repack vendor_boot.img
+    - name: 下載原廠 vendor_boot
+      run: |
+        cd workspace
+        curl -L "${{ github.event.inputs.ORIGINAL_VENDOR_BOOT }}" -o vendor_boot.img
+        ls -lh vendor_boot.img
 
-          mv new-boot.img vendor_boot_twrp.img
-          ls -lh vendor_boot_twrp.img
+    - name: 注入 TWRP
+      run: |
+        cd workspace
 
-      - name: 上傳成果
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: twrp-${{ github.run_id }}
-          name: TWRP VendorBoot Build
-          files: |
-            workspace/vendor_boot_twrp.img
-            workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery.cpio
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        ./magiskboot unpack vendor_boot.img
+
+        rm -f ramdisk.cpio
+        cp out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery.cpio ramdisk.cpio
+
+        ./magiskboot repack vendor_boot.img
+
+        mv new-boot.img vendor_boot_twrp.img
+        ls -lh vendor_boot_twrp.img
+
+    - name: 上傳 Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: twrp-${{ github.run_id }}
+        name: TWRP VendorBoot Build
+        files: |
+          workspace/vendor_boot_twrp.img
+          workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery.cpio
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
