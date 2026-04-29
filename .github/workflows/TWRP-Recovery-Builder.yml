@@ -6,15 +6,12 @@ on:
       DEVICE_TREE:
         description: "Device tree repo"
         required: true
-        default: "https://github.com/XPXC87/android_device_xiaomi_rothko_twrp"
       DEVICE_TREE_BRANCH:
         description: "Device tree branch"
         required: true
-        default: "twrp-14.1_a16"
       DEVICE_NAME:
         description: "Device codename"
         required: true
-        default: "rothko"
       ORIGINAL_VENDOR_BOOT:
         description: "原廠 vendor_boot.img 下載連結"
         required: true
@@ -22,15 +19,14 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    name: Build TWRP VendorBoot
 
     steps:
 
-    # 🔥 清空垃圾（很重要）
-    - name: 清理磁碟空間
+    # 🔥 清空空間
+    - name: 清理磁碟
       uses: rokibhasansagar/slimhub_actions@main
 
-    # 🔥 增加 swap（輔助）
+    # 🔥 Swap（輔助）
     - name: 設置 Swap
       uses: pierotofy/set-swap-space@master
       with:
@@ -63,16 +59,21 @@ jobs:
         cd workspace
         repo sync -c --no-clone-bundle --no-tags -j2
 
-    - name: 編譯 TWRP（低記憶體穩定版🔥）
+    # 🔥 修 kernel.mk TAB 問題（關鍵）
+    - name: 修復 kernel.mk
+      run: |
+        cd workspace
+        sed -i 's/^    /\t/' vendor/twrp/build/tasks/kernel.mk || true
+
+    - name: 編譯（低記憶體穩定🔥）
       run: |
         cd workspace
         source build/envsetup.sh
 
         export ALLOW_MISSING_DEPENDENCIES=true
-        export TARGET_USES_PREBUILT_KERNEL=true
         export TW_FORCE_VENDOR_BOOT=true
 
-        # 🔥 核心：防止 soong killed
+        # 🔥 防止 OOM
         export SOONG_UI_THREADS=2
         export NINJA_ARGS=-j2
         export _JAVA_OPTIONS="-Xmx2g"
@@ -88,7 +89,7 @@ jobs:
         find . | cpio -o -H newc --owner root:root > ../../recovery.cpio
 
         cd ../../
-        echo "==== 驗證 ===="
+        echo "==== 驗證 cpio ===="
         file recovery.cpio
         cpio -t < recovery.cpio | head
 
