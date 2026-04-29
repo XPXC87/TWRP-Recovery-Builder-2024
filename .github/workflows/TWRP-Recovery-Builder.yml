@@ -235,24 +235,43 @@ jobs:
 
       - name: 檢查產生的文件是否存在
         run: |
-          cd workspace
-          if [ -f out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery.img ]; then
-              echo "RECOVERY_TYPE=recovery" >> $GITHUB_ENV
-              echo "找到 recovery.img！"
-              echo "MD5_IMG=$(md5sum out/target/product/${{ github.event.inputs.DEVICE_NAME }}/${{ github.event.inputs.BUILD_TARGET }}.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
-          elif [ -f out/target/product/${{ github.event.inputs.DEVICE_NAME }}/boot.img ]; then
-              echo "RECOVERY_TYPE=boot" >> $GITHUB_ENV
-              echo "找到 boot.img！"
-              echo "MD5_IMG=$(md5sum out/target/product/${{ github.event.inputs.DEVICE_NAME }}/${{ github.event.inputs.BUILD_TARGET }}.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
-          elif [ -f out/target/product/${{ github.event.inputs.DEVICE_NAME }}/vendor_boot.img ]; then
-              echo "RECOVERY_TYPE=vendor_boot" >> $GITHUB_ENV
-              echo "找到 vendor_boot.img！"
-              echo "MD5_IMG=$(md5sum out/target/product/${{ github.event.inputs.DEVICE_NAME }}/vendor_boot.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
-          else
-              echo "未找到任何 Recovery 文件！"
-              exit 1
+          cd workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}
+          echo ">>> 列出輸出檔案"
+          ls -lh
+          IMG=""
+          TYPE=""
+          # 優先順序：vendor_boot > recovery > boot
+          if [ -f vendor_boot.img ]; then
+            IMG="vendor_boot.img"
+            TYPE="vendor_boot"
+          elif [ -f recovery.img ]; then
+            IMG="recovery.img"
+            TYPE="recovery"
+          elif [ -f boot.img ]; then
+            IMG="boot.img"
+            TYPE="boot"
           fi
-
+          # 如果沒有 img，檢查 cpio（ramdisk）
+          if [ -z "$IMG" ]; then
+          echo "⚠️ 未找到 img，嘗試搜尋 cpio（ramdisk）"
+          CPIO=$(find . -name "*.cpio" | head -n1)
+            if [ -n "$CPIO" ]; then
+              IMG="$CPIO"
+              TYPE="ramdisk"
+            fi
+          fi
+          # 最終檢查
+          if [ -z "$IMG" ]; then
+            echo "❌ 未找到任何輸出文件！"
+            exit 1
+          fi
+          echo "✅ 找到: $IMG"
+          echo "RECOVERY_TYPE=$TYPE" >> $GITHUB_ENV
+          echo "IMG_NAME=$IMG" >> $GITHUB_ENV
+          MD5=$(md5sum "$IMG" | cut -d ' ' -f 1)
+          echo "MD5_IMG=$MD5" >> $GITHUB_ENV
+          echo "MD5: $MD5"
+            
       - name: 打包 Recovery 安裝刷機包
         run: |
           if [ ${{ github.event.inputs.RECOVERY_INSTALLER }} = true ]; then
