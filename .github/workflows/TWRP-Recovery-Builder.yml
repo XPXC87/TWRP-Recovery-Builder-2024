@@ -1,322 +1,130 @@
-name: TWRP Recovery 編譯器 2024
+name: TWRP VendorBoot Builder FINAL (Stable)
+
 on:
-  workflow_dispatch: # 手動啟動工作流
+  workflow_dispatch:
     inputs:
-      MANIFEST_BRANCH:
-        description: 'TWRP 輕量化清單分支 (Minimal-Manifest Branch)'
-        required: true
-        default: 'twrp-14.1'
-        type: choice
-        options:
-          - twrp-14.1
-          - twrp-12.1
-          - twrp-11
-          - twrp-9.0
       DEVICE_TREE:
-        description: '自定義 Recovery 設備樹連結'
+        description: "Device tree repo"
         required: true
-        default: 'https://github.com/XPXC87/android_device_xiaomi_rothko_twrp'
+        default: "https://github.com/XPXC87/android_device_xiaomi_rothko_twrp"
       DEVICE_TREE_BRANCH:
-        description: '設備樹分支'
+        description: "Device tree branch"
         required: true
-        default: 'twrp-14.1_a16'
-      DEVICE_PATH:
-        description: '指定設備路徑'
-        required: true
-        default: 'device/xiaomi/rothko'
+        default: "twrp-14.1_a16"
       DEVICE_NAME:
-        description: '指定設備代號'
+        description: "Device codename"
         required: true
-        default: 'rothko'
-      BUILD_TARGET:
-        description: '指定編譯目標'
+        default: "rothko"
+      ORIGINAL_VENDOR_BOOT:
+        description: "原廠 vendor_boot.img 下載連結"
         required: true
-        default: 'vendorboot'
-        type: choice
-        options:
-          - boot
-          - recovery
-          - vendorboot
-      LDCHECK:
-        description: '要檢查的二進制文件路徑 (Blobs)'
-        required: true
-        default: 'system/bin/linker64'
-      RECOVERY_TAR:
-        description: '為三星設備生成 .tar 檔案'
-        required: false
-        default: false
-        type: boolean
-      RECOVERY_INSTALLER:
-        description: '包含 Recovery 安裝刷機包 (.zip)'
-        type: boolean
-        required: true
-        default: true
 
 jobs:
   build:
-    name: 由 ${{ github.actor }} 執行的 TWRP 編譯任務
     runs-on: ubuntu-22.04
-    # 僅允許倉庫擁有者執行
-    if: github.event.repository.owner.id == github.event.sender.id
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    permissions:
-      contents: write
+    name: Build TWRP VendorBoot
+
     steps:
-      - name: 檢出代碼 (Check Out)
-        uses: actions/checkout@v3
 
-      - name: 顯示輸入參數
-        run: |
-          echo "::group::用戶環境變數"
-          echo "正在顯示變數/輸入內容。"
-          echo "清單分支: ${{ github.event.inputs.MANIFEST_BRANCH }}"
-          echo "設備樹: ${{ github.event.inputs.DEVICE_TREE }}"
-          echo "設備樹分支: ${{ github.event.inputs.DEVICE_TREE_BRANCH }}"
-          echo "設備路徑: ${{ github.event.inputs.DEVICE_PATH }}"
-          echo "設備名稱: ${{ github.event.inputs.DEVICE_NAME }}"
-          echo "編譯目標: ${{ github.event.inputs.BUILD_TARGET }}image"
-          echo "包含安裝包: ${{ github.event.inputs.RECOVERY_INSTALLER }}"
-          echo "三星 TAR 格式: ${{ github.event.inputs.RECOVERY_TAR }}"
-          echo "::endgroup::"
+    # 🔥 清空垃圾（很重要）
+    - name: 清理磁碟空間
+      uses: rokibhasansagar/slimhub_actions@main
 
-      - name: 清理磁碟空間
-        uses: rokibhasansagar/slimhub_actions@main
-        
-      - name: 設置虛擬記憶體 (Swap Space)
-        uses: pierotofy/set-swap-space@master
-        with:
-          swap-size-gb: 24
-          
-      - name: 準備編譯環境
-        run: |
-          sudo apt update
-          sudo apt -y upgrade
-          sudo apt -y install gperf gcc-multilib gcc-10-multilib g++-multilib g++-10-multilib lib32ncurses5-dev x11proto-core-dev lib32z-dev libgl1-mesa-dev libxml2-utils xsltproc bc ccache lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libwxgtk3.0-gtk3-dev lzop pngcrush schedtool squashfs-tools imagemagick libbz2-dev lzma ncftp qemu-user-static libstdc++-10-dev libtinfo5 libgflags-dev
-          sudo add-apt-repository universe
-          sudo apt -y install libncurses5
+    # 🔥 增加 swap（輔助）
+    - name: 設置 Swap
+      uses: pierotofy/set-swap-space@master
+      with:
+        swap-size-gb: 24
 
-      - name: 安裝 OpenJDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: zulu
-          java-version: 8
+    - name: 安裝依賴
+      run: |
+        sudo apt update
+        sudo apt install -y git-core repo bc bison build-essential zip curl \
+        gcc-multilib g++-multilib libc6-dev-i386 lib32ncurses5-dev \
+        x11proto-core-dev libx11-dev lib32z-dev libgl1-mesa-dev \
+        libxml2-utils xsltproc unzip fontconfig cpio
 
-      - name: 安裝 Git-Repo 工具
-        run: |
-          mkdir ~/bin
-          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-          chmod a+x ~/bin/repo
-          sudo ln -sf ~/bin/repo /usr/bin/repo
+    - name: 初始化 Repo + Device Tree
+      run: |
+        mkdir workspace
+        cd workspace
 
-      - name: 檢查清單分支類型 (AOSP 或 Omni)
-        run: |
-          BRANCH="${{ github.event.inputs.MANIFEST_BRANCH }}"
+        repo init --depth=1 \
+          -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git \
+          -b twrp-14.1
 
-          # 預設用 Omni（舊版）
-          MANIFEST_URL="https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git"
+        mkdir -p device/xiaomi
+        git clone ${{ github.event.inputs.DEVICE_TREE }} \
+          -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} \
+          device/xiaomi/${{ github.event.inputs.DEVICE_NAME }}
 
-          # AOSP 分支（Android 11+）
-          case "$BRANCH" in
-          twrp-11|twrp-12.1|twrp-14.1)
-          MANIFEST_URL="https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git"
-          ;;
-          esac
+    - name: Repo Sync（低負載）
+      run: |
+        cd workspace
+        repo sync -c --no-clone-bundle --no-tags -j2
 
-          echo "MANIFEST_URL=$MANIFEST_URL" >> $GITHUB_ENV
-          echo "✔ 使用 manifest: $MANIFEST_URL"
+    - name: 編譯 TWRP（低記憶體穩定版🔥）
+      run: |
+        cd workspace
+        source build/envsetup.sh
 
-      - name: 初始化 Repo 倉庫
-        run: |
-          mkdir -p workspace
-          cd workspace
+        export ALLOW_MISSING_DEPENDENCIES=true
+        export TARGET_USES_PREBUILT_KERNEL=true
+        export TW_FORCE_VENDOR_BOOT=true
 
-          git config --global user.name "builder"
-          git config --global user.email "builder@github.com"
+        # 🔥 核心：防止 soong killed
+        export SOONG_UI_THREADS=2
+        export NINJA_ARGS=-j2
+        export _JAVA_OPTIONS="-Xmx2g"
 
-          echo "Branch: ${{ github.event.inputs.MANIFEST_BRANCH }}"
-          echo "Manifest: $MANIFEST_URL"
+        lunch twrp_${{ github.event.inputs.DEVICE_NAME }}-ap2a-userdebug
 
-          repo init --depth=1 \
-            -u $MANIFEST_URL \
-            -b ${{ github.event.inputs.MANIFEST_BRANCH }}
+        mka recoveryimage -j2
 
-      - name: 同步源碼 (Repo Sync)
-        run: |
-          cd workspace
-          repo sync -c --no-clone-bundle --no-tags -j$(nproc --all)
+    - name: 打包 recovery.cpio（正確來源）
+      run: |
+        cd workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery/root
 
-      - name: 克隆設備樹
-        run: |
-          cd workspace
-          git clone ${{ github.event.inputs.DEVICE_TREE }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.DEVICE_PATH }}
-          cd ${{ github.event.inputs.DEVICE_PATH }}
-          echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
+        find . | cpio -o -H newc --owner root:root > ../../recovery.cpio
 
-      - name: 檢查編譯設定檔 (Makefile)
-        run: |
-          cd workspace
-          if [ -f ${{ github.event.inputs.DEVICE_PATH }}/twrp_${{ github.event.inputs.DEVICE_NAME}}.mk ]; then
-              echo "DEVICE_MAKEFILE=twrp_${{ github.event.inputs.DEVICE_NAME }}" >> $GITHUB_ENV
-          elif [ -f ${{ github.event.inputs.DEVICE_PATH }}/omni_${{ github.event.inputs.DEVICE_NAME}}.mk ]; then
-              echo "DEVICE_MAKEFILE=omni_${{ github.event.inputs.DEVICE_NAME }}" >> $GITHUB_ENV
-          else
-              echo "找不到 Recovery Makefile 文件！"
-          fi
-        continue-on-error: true
-        
-      - name: 安裝 Python 2 (針對舊版本)
-        if: github.event.inputs.MANIFEST_BRANCH != 'twrp-11' && github.event.inputs.MANIFEST_BRANCH != 'twrp-12.1'  && github.event.inputs.MANIFEST_BRANCH != 'twrp-14'
-        run: |
-          sudo apt -y install python2
-          cd /usr/bin
-          sudo ln -sf python2 python
+        cd ../../
+        echo "==== 驗證 ===="
+        file recovery.cpio
+        cpio -t < recovery.cpio | head
 
-      - name: 執行編譯
-        run: |
-          cd workspace
+    - name: 下載 magiskboot
+      run: |
+        cd workspace
+        curl -L -o magiskboot https://github.com/topjohnwu/Magisk/releases/latest/download/magiskboot
+        chmod +x magiskboot
 
-          # 載入環境
-          source build/envsetup.sh
-          export ALLOW_MISSING_DEPENDENCIES=true
-          export BUILD_BROKEN_DUP_RULES=true
-          export BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES=true
-          export BUILD_BROKEN_USES_BUILD_COPY_HEADERS=true
-          export TARGET_USES_PREBUILT_KERNEL=true
-          export TW_FORCE_VENDOR_BOOT=true
+    - name: 下載原廠 vendor_boot
+      run: |
+        cd workspace
+        curl -L "${{ github.event.inputs.ORIGINAL_VENDOR_BOOT }}" -o vendor_boot.img
+        ls -lh vendor_boot.img
 
-          PRODUCT=${{ env.DEVICE_MAKEFILE }}
+    - name: 注入 TWRP（核心🔥）
+      run: |
+        cd workspace
 
-          # 🔥 A14 正確 release（不要再自動抓）
-          RELEASE=ap2a
+        ./magiskboot unpack vendor_boot.img
 
-          echo "Using PRODUCT=$PRODUCT"
-          echo "Using RELEASE=$RELEASE"
+        rm -f ramdisk.cpio
+        cp out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery.cpio ramdisk.cpio
 
-          # 🔥 lunch（完整 fallback）
-          if lunch ${PRODUCT}-${RELEASE}-userdebug; then
-            echo "✔ lunch userdebug"
-          elif lunch ${PRODUCT}-${RELEASE}-eng; then
-            echo "✔ lunch eng"
-          elif lunch ${PRODUCT}-eng; then
-            echo "✔ legacy lunch"
-          else
-            echo "❌ lunch 失敗"
-            exit 1
-          fi
+        ./magiskboot repack vendor_boot.img
 
-          # 清理（避免 ninja skip）
-          mka clean
+        mv new-boot.img vendor_boot_twrp.img
+        ls -lh vendor_boot_twrp.img
 
-          # 🔥 build target 自動 fallback
-          TARGET="${{ github.event.inputs.BUILD_TARGET }}image"
-
-          if mka $TARGET -j$(nproc --all); then
-            echo "✔ build $TARGET success"
-          else
-            echo "⚠️ $TARGET 失敗 → fallback recoveryimage"
-            mka recoveryimage -j$(nproc --all)
-          fi
-          echo "Done building"
-
-      - name: 設置編譯日期 (用於發佈)
-        run: |
-          echo "BUILD_DATE=$(date +%Y%m%d)" >> $GITHUB_ENV
-          DEVICE_TREE_URL="${{ github.event.inputs.DEVICE_TREE }}"
-          if [[ "${DEVICE_TREE_URL}" == *.git ]]; then
-            DEVICE_TREE_URL="${DEVICE_TREE_URL%.git}"
-          fi
-          echo "DEVICE_TREE_URL=${DEVICE_TREE_URL}" >> $GITHUB_ENV
-
-      - name: 檢查產生的文件是否存在
-        run: |
-          cd workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}
-          echo ">>> 列出輸出檔案"
-          ls -lh
-          IMG=""
-          TYPE=""
-          # 優先順序：vendor_boot > recovery > boot
-          if [ -f vendor_boot.img ]; then
-            IMG="vendor_boot.img"
-            TYPE="vendor_boot"
-          elif [ -f recovery.img ]; then
-            IMG="recovery.img"
-            TYPE="recovery"
-          elif [ -f boot.img ]; then
-            IMG="boot.img"
-            TYPE="boot"
-          fi
-          # 如果沒有 img，檢查 cpio（ramdisk）
-          if [ -z "$IMG" ]; then
-          echo "⚠️ 未找到 img，嘗試搜尋 cpio（ramdisk）"
-          CPIO=$(find . -name "*.cpio" | head -n1)
-            if [ -n "$CPIO" ]; then
-              IMG="$CPIO"
-              TYPE="ramdisk"
-            fi
-          fi
-          # 最終檢查
-          if [ -z "$IMG" ]; then
-            echo "❌ 未找到任何輸出文件！"
-            exit 1
-          fi
-          echo "✅ 找到: $IMG"
-          echo "RECOVERY_TYPE=$TYPE" >> $GITHUB_ENV
-          echo "IMG_NAME=$IMG" >> $GITHUB_ENV
-          MD5=$(md5sum "$IMG" | cut -d ' ' -f 1)
-          echo "MD5_IMG=$MD5" >> $GITHUB_ENV
-          echo "MD5: $MD5"
-            
-      - name: 打包 Recovery 安裝刷機包
-        run: |
-          if [ ${{ github.event.inputs.RECOVERY_INSTALLER }} = true ]; then
-            cd workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/
-            wget https://github.com/kinguser981/recovery-installer/releases/download/zip/recovery-installer.zip
-            zip -ur recovery-installer.zip ${{ env.RECOVERY_TYPE }}.img
-          fi
-        continue-on-error: true
-          
-      - name: 為三星設備轉換為 TAR 格式
-        run: |
-          if [ ${{ github.event.inputs.RECOVERY_TAR }} = true ]; then
-            cd workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/
-            tar -cvf ${{ env.RECOVERY_TYPE }}.tar ${{ env.RECOVERY_TYPE }}.img
-          fi
-        continue-on-error: true
-          
-      - name: 上傳至 GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/${{ env.RECOVERY_TYPE }}.tar
-            workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery-installer.zip
-            workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/${{ env.RECOVERY_TYPE }}.img
-          name: 非官方 TWRP - ${{ github.event.inputs.DEVICE_NAME }} // ${{ env.BUILD_DATE }}
-          tag_name: ${{ github.run_id }}
-          body: |
-            編譯成功。
-
-      - name: 發佈 Ramdisk 相關文件
-        uses: softprops/action-gh-release@4634c16e79c963813287e889244c50009e7f0981
-        with:
-          files: |
-            workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/obj/PACKAGING/vendor_ramdisk_fragments_intermediates/recovery.*
-            workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/ramdisk-recovery.*
-          name: 非官方 TWRP - ${{ github.event.inputs.DEVICE_NAME }} // ${{ env.BUILD_DATE }}
-          tag_name: ${{ github.run_id }}
-          body: |
-            清單分支: ${{ github.event.inputs.MANIFEST_BRANCH }}
-            編譯目標: ${{ github.event.inputs.BUILD_TARGET}}.img
-            設備: [設備樹/分支](${{ env.DEVICE_TREE_URL }}/tree/${{ github.event.inputs.DEVICE_TREE_BRANCH }})
-            提交記錄: 編譯時最新的 [commit](${{ env.DEVICE_TREE_URL }}/commit/${{ env.COMMIT_ID }})
-            MD5 (img): ${{ env.MD5_IMG }}
-            
-      - name: 檢查缺失的依賴項 (Missing Dependencies)
-        run: |
-          cd tools
-          mv -n libneeds ${GITHUB_WORKSPACE}/workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery/root/
-          mv -n ldcheck ${GITHUB_WORKSPACE}/workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery/root/
-          cd ../workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery/root
-          python3 ldcheck -p system/lib64:vendor/lib64:system/lib:vendor/lib -d ${{ github.event.inputs.LDCHECK }}
-          echo "依賴檢查完成。請檢查結果並根據需要重新配置設備樹。"
-        continue-on-error: true
+    - name: 上傳 Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: twrp-${{ github.run_id }}
+        name: TWRP VendorBoot Build
+        files: |
+          workspace/vendor_boot_twrp.img
+          workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery.cpio
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
