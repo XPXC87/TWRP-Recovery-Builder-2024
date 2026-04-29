@@ -33,12 +33,22 @@ jobs:
         libxml2-utils xsltproc unzip fontconfig cpio
 
     # 🔥 解決 soong killed（關鍵）
-    - name: 啟用 Swap
+    - name: 啟用 Swap（穩定版）
       run: |
-        sudo fallocate -l 8G /swapfile
+        # 如果已存在 swap，先關閉
+        sudo swapoff -a || true
+
+        # 刪掉舊 swapfile（如果有）
+        sudo rm -f /swapfile
+
+        # 建立新的
+        sudo fallocate -l 8G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=8192
+
         sudo chmod 600 /swapfile
         sudo mkswap /swapfile
         sudo swapon /swapfile
+
+        free -h
 
     - name: 初始化 Repo + 放入設備樹
       run: |
