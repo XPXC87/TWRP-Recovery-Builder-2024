@@ -79,13 +79,14 @@ jobs:
         export TARGET_USES_PREBUILT_KERNEL=true
         export TW_FORCE_VENDOR_BOOT=true
 
-        # 🔥 降負載（避免 killed）
-        export SOONG_UI_THREADS=4
-        export NINJA_ARGS=-j4
+        # 🔥 限制記憶體使用（關鍵）
+        export SOONG_UI_THREADS=2
+        export NINJA_ARGS=-j2
+        export _JAVA_OPTIONS="-Xmx2g"
 
-        lunch twrp_${{ github.event.inputs.DEVICE_NAME }}-ap2a-userdebug
+        lunch twrp_${DEVICE}-ap2a-userdebug
 
-        mka recoveryimage -j4
+        mka recoveryimage -j2
 
     - name: 生成正確 recovery.cpio
       run: |
