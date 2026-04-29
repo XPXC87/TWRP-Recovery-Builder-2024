@@ -176,7 +176,7 @@ jobs:
           export TW_FORCE_VENDOR_BOOT=true
           export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
           
-          lunch ${{ env.DEVICE_MAKEFILE }}-eng
+          lunch ${{ env.DEVICE_MAKEFILE }}-userdebug || lunch ${{ env.DEVICE_MAKEFILE }}-eng
           make clean
           
           TARGET="${{ github.event.inputs.BUILD_TARGET }}"
