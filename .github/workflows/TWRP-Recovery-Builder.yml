@@ -1,10 +1,10 @@
-name: TWRP Recovery Builder 2024
+name: TWRP Recovery 建構器 2024
 
 on:
   workflow_dispatch:
     inputs:
       MANIFEST_BRANCH:
-        description: 'TWRP Minimal-Manifest Branch'
+        description: 'TWRP 最小化 Manifest 分支'
         required: true
         default: ''
         type: choice
@@ -13,24 +13,29 @@ on:
         - twrp-12.1
         - twrp-11
         - twrp-9.0
+
       DEVICE_TREE:
-        description: 'Custom Recovery Tree' 
+        description: '自訂 Recovery Tree'
         required: true
         default: 'https://github.com/XPXC87/android_device_xiaomi_rothko_twrp'
+
       DEVICE_TREE_BRANCH:
-        description: 'Custom Recovery Tree Branch' 
+        description: '自訂 Recovery Tree 分支'
         required: true
         default: 'twrp-14.1_a16'
+
       DEVICE_PATH:
-        description: 'Specify your Device Path' 
+        description: '指定裝置路徑'
         required: true
         default: 'device/xiaomi/rothko'
+
       DEVICE_NAME:
-        description: 'Specify your Device Codename' 
+        description: '指定裝置代號'
         required: true
         default: 'rothko'
+
       BUILD_TARGET:
-        description: 'Specify your Build Target' 
+        description: '指定建構目標'
         required: true
         default: 'vendorboot'
         type: choice
@@ -38,56 +43,63 @@ on:
         - boot
         - recovery
         - vendorboot
+
       LDCHECK:
-        description: 'Path of blobs to check' 
+        description: '要檢查的 blobs 路徑'
         required: true
         default: 'system/bin/linker64'
+
       RECOVERY_TAR:
-        description: 'Release Recovery.tar For Samsung devices'
+        description: '為 Samsung 裝置釋出 recovery.tar'
         required: false
         default: false
         type: boolean
+
       RECOVERY_INSTALLER:
-        description: 'Include recovery installer.zip'
+        description: '包含 recovery installer.zip'
         type: boolean
         required: true
         default: true
+
 jobs:
   build:
-    name: Build TWRP by ${{ github.actor }}
+    name: 由 ${{ github.actor }} 建構 TWRP
     runs-on: ubuntu-22.04
     if: github.event.repository.owner.id == github.event.sender.id
+
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     permissions:
       contents: write
+
     steps:
-    - name: Check Out
+    - name: 取得原始碼
       uses: actions/checkout@v3
       
-    - name: Display Inputs
+    - name: 顯示輸入參數
       run: |
-        echo "::group::User Environment Variables"
-        echo "Displaying variables/inputs."
-        echo "Manifest Branch: ${{ github.event.inputs.MANIFEST_BRANCH }}"
-        echo "Device Tree: ${{ github.event.inputs.DEVICE_TREE }}"
-        echo "Device Branch: ${{ github.event.inputs.DEVICE_TREE_BRANCH }}"
-        echo "Device Path: ${{ github.event.inputs.DEVICE_PATH }}"
-        echo "Device Name: ${{ github.event.inputs.DEVICE_NAME }}"
-        echo "Build Target: ${{ github.event.inputs.BUILD_TARGET }}image"
-        echo "Include Recovery Installer: ${{ github.event.inputs.RECOVERY_INSTALLER }}"
-        echo "Release recovery.tar For Samsung devices: ${{ github.event.inputs.RECOVERY_TAR }}"
+        echo "::group::使用者環境變數"
+        echo "顯示變數/輸入內容"
+        echo "Manifest 分支: ${{ github.event.inputs.MANIFEST_BRANCH }}"
+        echo "裝置 Tree: ${{ github.event.inputs.DEVICE_TREE }}"
+        echo "裝置分支: ${{ github.event.inputs.DEVICE_TREE_BRANCH }}"
+        echo "裝置路徑: ${{ github.event.inputs.DEVICE_PATH }}"
+        echo "裝置名稱: ${{ github.event.inputs.DEVICE_NAME }}"
+        echo "建構目標: ${{ github.event.inputs.BUILD_TARGET }}image"
+        echo "包含 Recovery Installer: ${{ github.event.inputs.RECOVERY_INSTALLER }}"
+        echo "釋出 recovery.tar (Samsung 裝置): ${{ github.event.inputs.RECOVERY_TAR }}"
         echo "::endgroup::"
 
-    - name: Cleanup
+    - name: 清理環境
       uses: rokibhasansagar/slimhub_actions@main
       
-    - name: Set Swap Space
+    - name: 設定 Swap 空間
       uses: pierotofy/set-swap-space@master
       with:
         swap-size-gb: 24
         
-    - name: Prepare the environment
+    - name: 準備建構環境
       run: |
         sudo apt update
         sudo apt -y upgrade
@@ -95,20 +107,20 @@ jobs:
         sudo add-apt-repository universe
         sudo apt -y install libncurses5
 
-    - name: Install OpenJDK
+    - name: 安裝 OpenJDK
       uses: actions/setup-java@v4
       with:
         distribution: zulu
         java-version: 8
 
-    - name: Install Git-Repo
+    - name: 安裝 Git-Repo
       run: |
         mkdir ~/bin
         curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
         chmod a+x ~/bin/repo
         sudo ln -sf ~/bin/repo /usr/bin/repo
 
-    - name: Check Manifest Branch
+    - name: 檢查 Manifest 分支
       uses: haya14busa/action-cond@v1
       id: manifest
       with:
@@ -116,7 +128,7 @@ jobs:
         if_true: https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git
         if_false: https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git
 
-    - name: Initialize Repo
+    - name: 初始化 Repo
       run: |
         mkdir workspace
         cd workspace
@@ -124,26 +136,26 @@ jobs:
         git config --global user.email "builder@github.com"
 
         if [ "${{ github.event.inputs.MANIFEST_BRANCH }}" = "twrp-14.1" ]; then
-         echo "Using Android 14 manifest"
+         echo "使用 Android 14 manifest"
          repo init --depth=1 -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git -b twrp-14.1
         else
-          echo "Using legacy manifest"
+          echo "使用舊版 manifest"
           repo init --depth=1 -u ${{ steps.manifest.outputs.value }} -b ${{ github.event.inputs.MANIFEST_BRANCH }}
         fi
 
-    - name: Repo Sync
+    - name: 同步 Repo
       run: |
         cd workspace
         repo sync -c --no-clone-bundle --no-tags -j$(nproc --all)
 
-    - name: Clone Device Tree
+    - name: 複製裝置 Tree
       run: |
         cd workspace
         git clone ${{ github.event.inputs.DEVICE_TREE }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.DEVICE_PATH }}
         cd ${{ github.event.inputs.DEVICE_PATH }}
         echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
-    - name: Check Build Makefile
+    - name: 檢查建構 Makefile
       run: |
         cd workspace
         if [ -f ${{ github.event.inputs.DEVICE_PATH }}/twrp_${{ github.event.inputs.DEVICE_NAME}}.mk ]; then
@@ -151,132 +163,5 @@ jobs:
         elif [ -f ${{ github.event.inputs.DEVICE_PATH }}/omni_${{ github.event.inputs.DEVICE_NAME}}.mk ]; then
             echo "DEVICE_MAKEFILE=omni_${{ github.event.inputs.DEVICE_NAME }}" >> $GITHUB_ENV
         else
-            echo "No recovery makefile file found!"
+            echo "找不到 recovery makefile!"
         fi
-      continue-on-error: true
-      
-    - name: Install Python 2
-      if: github.event.inputs.MANIFEST_BRANCH != 'twrp-11' && github.event.inputs.MANIFEST_BRANCH != 'twrp-12.1'  && github.event.inputs.MANIFEST_BRANCH != 'twrp-14'
-      run: |
-        sudo apt -y install python2
-        cd /usr/bin
-        sudo ln -sf python2 python
-
-    - name: Building Image 
-      run: |
-        cd workspace
-        source build/envsetup.sh
-        export ALLOW_MISSING_DEPENDENCIES=true
-        export BUILD_BROKEN_DUP_RULES=true
-        export BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES=true
-        export BUILD_BROKEN_USES_BUILD_COPY_HEADERS=true
-        export TARGET_USES_PREBUILT_KERNEL=true
-        export TW_FORCE_VENDOR_BOOT=true
-        export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
-        lunch ${{ env.DEVICE_MAKEFILE }}-eng
-        make clean
-        TARGET="${{ github.event.inputs.BUILD_TARGET }}"
-        MANIFEST="${{ github.event.inputs.MANIFEST_BRANCH }}"
-        echo "Manifest: $MANIFEST"
-        echo "Target: $TARGET"
-        # 🚀 自動判斷模式
-        if [ "$MANIFEST" = "twrp-14.1" ]; then
-          echo ">>> Android 14 mode (vendor_boot priority)"
-          mka vendorbootimage -j$(nproc --all) || {
-            echo "❌ vendor_boot failed"
-            echo ">>> fallback to recovery"
-            mka recoveryimage
-          }
-        else
-          echo ">>> Legacy mode"
-        if [ "$TARGET" = "vendorboot" ]; then
-            mka vendorbootimage || mka recoveryimage
-        elif [ "$TARGET" = "boot" ]; then
-            mka bootimage
-        else
-            mka recoveryimage
-        fi
-        fi
-        echo "✅ Build finished"
-      
-    - name: Set Build Date # Output will be use in Release
-      run: |
-        echo "BUILD_DATE=$(date +%Y%m%d)" >> $GITHUB_ENV
-        DEVICE_TREE_URL="${{ github.event.inputs.DEVICE_TREE }}"
-        if [[ "${DEVICE_TREE_URL}" == *.git ]]; then
-          DEVICE_TREE_URL="${DEVICE_TREE_URL%.git}"
-        fi
-        echo "DEVICE_TREE_URL=${DEVICE_TREE_URL}" >> $GITHUB_ENV
-
-    - name: Check if Recovery Exist
-      run: |
-        cd workspace
-        if [ -f out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery.img ]; then
-            echo "RECOVERY_TYPE=recovery" >> $GITHUB_ENV
-            echo "recovery.img file found!"
-            echo "MD5_IMG=$(md5sum out/target/product/${{ github.event.inputs.DEVICE_NAME }}/${{ github.event.inputs.BUILD_TARGET }}.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
-        elif [ -f out/target/product/${{ github.event.inputs.DEVICE_NAME }}/boot.img ]; then
-            echo "RECOVERY_TYPE=boot" >> $GITHUB_ENV
-            echo "boot.img file found!"
-            echo "MD5_IMG=$(md5sum out/target/product/${{ github.event.inputs.DEVICE_NAME }}/${{ github.event.inputs.BUILD_TARGET }}.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
-        elif [ -f out/target/product/${{ github.event.inputs.DEVICE_NAME }}/vendor_boot.img ]; then
-            echo "RECOVERY_TYPE=vendor_boot" >> $GITHUB_ENV
-            echo "vendor_boot.img file found!"
-            echo "MD5_IMG=$(md5sum out/target/product/${{ github.event.inputs.DEVICE_NAME }}/vendor_boot.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
-        else
-            echo "No Recovery file found!"
-            cd Exit
-        fi
-
-    - name: Include Recovery Installer
-      run: |
-        if [ ${{ github.event.inputs.RECOVERY_INSTALLER }} = true ]; then
-          cd workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/
-          wget https://github.com/kinguser981/recovery-installer/releases/download/zip/recovery-installer.zip
-          zip -ur recovery-installer.zip ${{ env.RECOVERY_TYPE }}.img
-        fi
-      continue-on-error: true
-        
-    - name: Recovery to tar for Samsung devices
-      run: |
-        if [ ${{ github.event.inputs.RECOVERY_TAR }} = true ]; then
-          cd workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/
-          tar -cvf ${{ env.RECOVERY_TYPE }}.tar ${{ env.RECOVERY_TYPE }}.img
-        fi
-      continue-on-error: true
-        
-    - name: Upload to Release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: |
-          workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/${{ env.RECOVERY_TYPE }}.tar
-          workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery-installer.zip
-          workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/${{ env.RECOVERY_TYPE }}.img
-        name: Unofficial TWRP for ${{ github.event.inputs.DEVICE_NAME }} // ${{ env.BUILD_DATE }}
-        tag_name: ${{ github.run_id }}
-        body: |
-
-    - name: Release ramdisk-recovery
-      uses: softprops/action-gh-release@4634c16e79c963813287e889244c50009e7f0981
-      with:
-        files: |
-          workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/obj/PACKAGING/vendor_ramdisk_fragments_intermediates/recovery.*
-          workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/ramdisk-recovery.*
-        name: Unofficial TWRP for ${{ github.event.inputs.DEVICE_NAME }} // ${{ env.BUILD_DATE }}
-        tag_name: ${{ github.run_id }}
-        body: |
-          Manifest: ${{ github.event.inputs.MANIFEST_BRANCH }}
-          Target: ${{ github.event.inputs.BUILD_TARGET}}.img
-          Device: [Device Tree/Branch](${{ env.DEVICE_TREE_URL }}/${{ github.eventinputs.DEVICE_TREE_BRANCH }})
-          Commit: Most recent [commit](${{ env.DEVICE_TREE_URL }}/commit/${{ env.COMMIT_ID }}) during building.
-          MD5 (img): ${{ env.MD5_IMG }}
-          
-    - name: Checking For Missing Dependencies
-      run: |
-        cd tools
-        mv -n libneeds ${GITHUB_WORKSPACE}/workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery/root/
-        mv -n ldcheck ${GITHUB_WORKSPACE}/workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery/root/
-        cd ../workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery/root
-        python3 ldcheck -p system/lib64:vendor/lib64:system/lib:vendor/lib -d ${{ github.event.inputs.LDCHECK }}
-        echo "Done checking missing dependencies. Review, and reconfigure your tree."
-      continue-on-error: true
