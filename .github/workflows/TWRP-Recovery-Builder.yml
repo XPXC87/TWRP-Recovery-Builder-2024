@@ -182,40 +182,46 @@ jobs:
           [ -z "$PRODUCT" ] && PRODUCT=${DEVICE_MAKEFILE}
           echo "使用 product: $PRODUCT"
 
-          # 判斷新舊架構（Android 13+ 有 release_config）
-          if [ -d build/make/core/release_config ]; then
-            echo ">>> 使用新架構 (Android 13+)"
-            # 抓 release
-            RELEASE=$(ls build/make/core/release_config 2>/dev/null | sed 's/.mk//' | head -n1)
-            [ -z "$RELEASE" ] && RELEASE=ap2a
-            echo "使用 release: $RELEASE"
-            # lunch（新架構）
-            lunch ${PRODUCT}-${RELEASE}-userdebug || lunch ${PRODUCT}-userdebug
-          else
-            echo ">>> 使用舊架構 (Android 12-)"
-            # lunch（舊架構）
-            lunch ${PRODUCT}-userdebug
+          # 判斷並執行 lunch（自動適配）
+          echo ">>> 嘗試新架構 lunch"
+
+          RELEASE=$(ls build/make/core/release_config 2>/dev/null | sed 's/.mk//' | head -n1)
+          [ -z "$RELEASE" ] && RELEASE=ap2a
+
+          echo "使用 release: $RELEASE"
+
+          lunch ${PRODUCT}-${RELEASE}-userdebug && MODE="NEW" || MODE="OLD"
+
+          if [ "$MODE" = "OLD" ]; then
+            echo ">>> fallback 舊架構"
+            lunch ${PRODUCT}-userdebug || {
+              echo "❌ lunch 完全失敗"
+              lunch
+              exit 1
+            }
           fi
-          make clean
+
+          # ⚠️ 補這兩行（關鍵）
           TARGET="${{ github.event.inputs.BUILD_TARGET }}"
           MANIFEST="${{ github.event.inputs.MANIFEST_BRANCH }}"
 
           if [ "$MANIFEST" = "twrp-14.1" ]; then
             echo ">>> Android 14+ 模式 (優先 vendor_boot)"
             mka vendorbootimage -j$(nproc --all) || {
-            echo "❌ vendor_boot 失敗 → fallback recovery"
-            mka recoveryimage
+              echo "❌ vendor_boot 失敗 → fallback recovery"
+              mka recoveryimage
             }
           else
             echo ">>> 舊版模式"
-          if [ "$TARGET" = "vendorboot" ]; then
-            mka vendorbootimage || mka recoveryimage
+            if [ "$TARGET" = "vendorboot" ]; then
+              mka vendorbootimage || mka recoveryimage
             elif [ "$TARGET" = "boot" ]; then
               mka bootimage
             else
               mka recoveryimage
             fi
           fi
+
           echo "✅ 編譯結束"
 
       - name: 設置編譯日期 (用於發佈)
