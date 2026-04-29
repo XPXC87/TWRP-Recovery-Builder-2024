@@ -167,7 +167,7 @@ jobs:
         run: |
           cd workspace
           source build/envsetup.sh
-          # 設置編譯環境變數
+          # 環境變數
           export ALLOW_MISSING_DEPENDENCIES=true
           export BUILD_BROKEN_DUP_RULES=true
           export BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES=true
@@ -175,32 +175,44 @@ jobs:
           export TARGET_USES_PREBUILT_KERNEL=true
           export TW_FORCE_VENDOR_BOOT=true
           export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
-          
-          lunch ${{ env.DEVICE_MAKEFILE }}-trunk_staging-userdebug || lunch ${{ env.DEVICE_MAKEFILE }}-userdebug
+
+          # 抓 release（穩定）
+          RELEASE=$(ls build/make/core/release_config 2>/dev/null | sed 's/.mk//' | head -n1)
+          [ -z "$RELEASE" ] && RELEASE=ap2a
+          echo "使用 release: $RELEASE"
+
+          # 抓 product（穩定）
+          PRODUCT=$(grep -r "PRODUCT_NAME" device 2>/dev/null | grep "${DEVICE_NAME}" | head -n1 | awk -F'=' '{print $2}' | xargs)
+          [ -z "$PRODUCT" ] && PRODUCT=${DEVICE_MAKEFILE}
+          echo "使用 product: $PRODUCT"
+
+          # lunch（防炸 fallback）
+          lunch ${PRODUCT}-${RELEASE}-userdebug || lunch ${PRODUCT}-userdebug
+
           make clean
-          
+
           TARGET="${{ github.event.inputs.BUILD_TARGET }}"
           MANIFEST="${{ github.event.inputs.MANIFEST_BRANCH }}"
-          
-          # 自動判斷編譯模式
+
           if [ "$MANIFEST" = "twrp-14.1" ]; then
-            echo ">>> Android 14 模式 (優先編譯 vendor_boot)"
+            echo ">>> Android 14 模式 (優先 vendor_boot)"
             mka vendorbootimage -j$(nproc --all) || {
-              echo "❌ vendor_boot 編譯失敗，嘗試回退至 recovery"
+              echo "❌ vendor_boot 失敗 → fallback recovery"
               mka recoveryimage
             }
           else
             echo ">>> 舊版模式"
             if [ "$TARGET" = "vendorboot" ]; then
-                mka vendorbootimage || mka recoveryimage
+              mka vendorbootimage || mka recoveryimage
             elif [ "$TARGET" = "boot" ]; then
-                mka bootimage
+              mka bootimage
             else
-                mka recoveryimage
+              mka recoveryimage
             fi
           fi
+
           echo "✅ 編譯結束"
-        
+
       - name: 設置編譯日期 (用於發佈)
         run: |
           echo "BUILD_DATE=$(date +%Y%m%d)" >> $GITHUB_ENV
